@@ -1,0 +1,15 @@
+[package]
+name = "base"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "~3.2", features = ["derive", "env"] }
+config = { version = "0.13.2", default-features = false, features = ["toml"] }
+osmpbfreader = "0.17.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1"
+snafu = "^0.7.3"
+time = "^0.3"
+tokio = { version = "1.20.2", features = ["full", "tracing"] }
+tracing = "0.1"

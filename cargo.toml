@@ -1,0 +1,18 @@
+[workspace]
+members = [
+    "base",
+    "open_rust_map",
+]
+
+[profile.dev]
+# This sets the number of codegen units to 1, which can affect compilation speed and optimization. A higher number can speed up compilation, but may increase memory usage.
+codegen-units = 1
+
+# This sets the panic behavior to "abort", which means that when a panic occurs, the program will immediately abort and exit.
+panic = "abort"
+
+# This enables stripping of debug symbols, which can reduce the size of the compiled binary.
+strip = true
+
+# This enables Link Time Optimization (LTO), which can improve performance by allowing the compiler to optimize across module boundaries.
+lto = true
