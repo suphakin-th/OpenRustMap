@@ -1,0 +1,17 @@
+log_level="debug"
+
+[database]
+host = "localhost"
+port = "5433"
+username = "babylvoob"
+password = "test"
+database_name = "x_dev"
+require_ssl = false
+
+[database_log_write]
+host = "localhost"
+port = "5433"
+username = "postgres"
+password = "test"
+database_name = "x_archive"
+require_ssl = false
