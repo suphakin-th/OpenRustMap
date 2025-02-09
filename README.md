@@ -1,2 +1,3 @@
 # OpenRustMap
-GEO + RUST +
+GEO + Openstreetmap + RUST + Leaflet
+
