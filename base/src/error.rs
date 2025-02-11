@@ -1,17 +1,8 @@
 use std::io;
 
 use config::ConfigError;
-use poisson::ctx::ContextError;
-use reqwest::{
-	header::{InvalidHeaderValue, ToStrError},
-	Error as ReqErr,
-};
+use reqwest::Error as ReqErr;
 use snafu::{prelude::*, Report};
-use time::error::ComponentRange;
-use tokio::{
-	sync::broadcast::error::{RecvError, SendError},
-	task::JoinError,
-};
 use tracing::metadata::ParseLevelFilterError;
 
 #[derive(Debug, Snafu)]

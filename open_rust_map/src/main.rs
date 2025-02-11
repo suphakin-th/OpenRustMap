@@ -1,7 +1,7 @@
-use osm_pbf::{PbfReader, Blob};
+use osmpbfreader::{OsmPbfReader, Blob};
 
-fn main() {
-    let file = std::fs::File::open("data /thailand.pbf")?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let file = std::fs::File::open("data/thailand.pbf")?;
     let mut reader = PbfReader::new(file);
 
     while let Some(blob) = reader.next_blob()? {
@@ -19,6 +19,6 @@ fn main() {
             }
         }
     }
-
     Ok(())
 }
+
