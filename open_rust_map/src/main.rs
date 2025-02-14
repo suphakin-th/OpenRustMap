@@ -1,24 +1,15 @@
-use osmpbfreader::{OsmPbfReader, Blob};
+use clap::Parser;
+use open_rust_map::{
+    app::run,
+    configuration::{setting, SETTINGS},
+};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let file = std::fs::File::open("data/thailand.pbf")?;
-    let mut reader = PbfReader::new(file);
+use base::{model::config_model, utils};
 
-    while let Some(blob) = reader.next_blob()? {
-        match blob {
-            Blob::OSMData(data) => {
-                // Process OSM data here
-                println!("OSM data: {:?}", data);
-            }
-            Blob::OSMHeader(header) => {
-                // Process OSM header here
-                println!("OSM header: {:?}", header);
-            }
-            _ => {
-                // Ignore other blob types
-            }
-        }
-    }
-    Ok(())
+#[tokio::main]
+async fn main() -> utils::Result<()> {
+    let arg = config_model::CliCommand::parse();
+    let config = setting::get_configuration(&arg).await?;
+    let setting = SETTINGS.get_or_init(|| async move { config }).await;
+    run(setting).await
 }
-
