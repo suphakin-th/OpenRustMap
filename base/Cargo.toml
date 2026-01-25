@@ -3,25 +3,46 @@ name = "base"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+gdal-support = ["gdal", "gdal-sys"]
+lidar-support = ["las"]
+
 [dependencies]
+
+# Async utilities - MIT/Apache-2.0
+async-trait = "0.1"
 clap = { version = "4.4", features = ["derive"] }
 config = { version = "0.13.2", default-features = false, features = ["toml"] }
-osmpbfreader = "0.16.0"
-osm-pbf = "0.3.3"
-petgraph = "0.6"
+futures = "0.3"
+
+# Geospatial processing - All open source
+gdal = { version = "0.16", optional = true }
+gdal-sys = { version = "0.9", optional = true }
 geo = "0.26"
 geo-types = "0.7"
+geojson = "0.24"
+hashbrown = "0.14"
+indicatif = "0.17"
+
+# Lidar support (future) - MIT/Apache-2.0
+las = { version = "0.8", optional = true }
+nonempty = "0.9.0"
+num-traits = "0.2.18"
+osm-pbf = "0.3.3"
+osmpbfreader = "0.16.0"
+petgraph = "0.6"
+rayon = "1.7"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 snafu = "^0.7.3"
-nonempty = "0.9.0"
-num-traits = "0.2.18"
-indicatif = "0.17"
+
+# Database (sqlx for migrations and queries) - MIT/Apache-2.0
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "migrate", "time", "json", "uuid"] }
 time = "^0.3"
-rayon = "1.7"
-hashbrown = "0.14"
 tokio = { version = "1.20.2", features = ["full", "tracing"] }
-tracing = "0.1"
-reqwest = { version = "0.12", features = ["json"] }
 tokio-postgres = { version = "0.7.7", features = ["with-serde_json-1", "with-time-0_3"] }
+tracing = "0.1"
 tracing-subscriber = { version = "0.3.16", features = ["json"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }

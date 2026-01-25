@@ -1,8 +1,6 @@
 [workspace]
-members = [
-    "base",
-    "open_rust_map",
-]
+members = ["base", "open_rust_map"]
+resolver = "2"
 
 [profile.dev]
 # This sets the number of codegen units to 1, which can affect compilation speed and optimization. A higher number can speed up compilation, but may increase memory usage.

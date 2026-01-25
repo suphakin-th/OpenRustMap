@@ -20,6 +20,10 @@ pub enum Error {
     GlobalDefautError,
     #[snafu(display("pg error"))]
     TokioPgError { source: tokio_postgres::Error },
+    #[snafu(display("sqlx error: {message}"))]
+    SqlxError { message: String },
+    #[snafu(display("database error: {message}"))]
+    DatabaseError { message: String },
     #[snafu(display("overflow error"))]
     Overflow,
     #[snafu(display("serde json error"))]
