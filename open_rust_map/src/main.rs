@@ -9,9 +9,8 @@ use petgraph::graph::{NodeIndex, UnGraph};
 use petgraph::algo::astar;
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
-use rayon::prelude::*;
 use tracing::{info, debug, warn, error, instrument};
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -45,6 +44,7 @@ struct Args {
 struct Node {
     id: NodeId,
     point: Point<f64>,
+    #[allow(dead_code)]
     tags: Tags,
 }
 
@@ -54,6 +54,7 @@ struct Edge {
     target: NodeId,
     distance: f64,
     way_id: WayId,
+    #[allow(dead_code)]
     highway_type: Option<String>,
 }
 
@@ -64,9 +65,7 @@ struct Graph {
 }
 
 impl Graph {
-    #[instrument(skip(self))]
     fn new() -> Self {
-        debug!("Creating new graph");
         Graph {
             graph: UnGraph::new_undirected(),
             node_indices: HashMap::new(),
@@ -133,7 +132,7 @@ impl Graph {
             |finish| finish == end,
             |e| {
                 let edge = e.weight();
-                edge.distance as f64
+                edge.distance
             },
             |idx| {
                 let node = &self.graph[idx];
@@ -143,18 +142,18 @@ impl Graph {
         );
         
         match &result {
-            Some((path, cost)) => {
+            Some((cost, path)) => {
                 debug!("Path found with {} nodes and cost {:.2}", path.len(), cost);
             }
             None => {
                 warn!("No path found between nodes");
             }
         }
-        
-        result
+
+        result.map(|(cost, path)| (path, cost))
     }
 }
-}
+
 
 #[instrument]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
