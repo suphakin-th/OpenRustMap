@@ -13,21 +13,64 @@ OpenRustMap is a production-ready geospatial data platform for environmental ana
 
 ## Key Features
 
-### Current Capabilities
-- OSM PBF file parsing and graph-based routing (A* pathfinding)
-- Modular architecture with facade design pattern
-- Async runtime with Tokio
-- Comprehensive error handling with Snafu
-- Configuration management for multiple environments
+### ✅ Implemented (v0.1.0)
 
-### Planned Capabilities
-- Multi-format data import (OSM PBF, GISDA shapefiles, GeoTIFF DEMs, Lidar)
-- PostgreSQL + PostGIS storage with spatial indexing
-- Flood extent calculation and impact analysis
-- Extensible data loader system with trait-based polymorphism
-- Functional data processing pipelines
-- Web API for remote access
-- Interactive Leaflet visualization
+#### 1. Direct PBF Visualization (`pbf_view`)
+- ⚡ **Instant visualization** - No database setup needed
+- 🗺️ **Interactive Leaflet maps** - Generates standalone HTML
+- 🎯 **Bounding box filtering** - Focus on specific areas
+- 🏷️ **Feature type filtering** - highways, buildings, waterways
+- 💾 **Zero memory issues** - Streams data efficiently
+
+#### 2. Database-Backed Storage (`pbf_import`)
+- 📦 **Streaming import** - Handles unlimited dataset sizes
+- 🗄️ **PostgreSQL + PostGIS** - Full spatial database
+- 🚀 **Spatial indexing** - GIST indexes for fast queries
+- 💪 **Memory efficient** - Batch processing (configurable)
+- 🔍 **Advanced queries** - Complex spatial operations
+
+#### 3. Pathfinding (`open_rust_map`)
+- 🗺️ **A* algorithm** - Geodesic distance heuristic
+- ⚡ **Graph-based routing** - In-memory road networks
+- 📍 **Coordinate queries** - Lat/lon to nearest node
+- 📊 **GeoJSON output** - Visualize results
+
+#### 4. Infrastructure
+- 🔧 **Automated setup** - Database configuration scripts
+- 📋 **Schema migrations** - Version-controlled with sqlx
+- ✅ **Setup verification** - Health check scripts
+- 🎨 **Facade pattern** - Clean modular architecture
+
+### 🔄 In Progress
+
+- Web visualization server (Axum + Leaflet)
+- DEM/elevation data import
+- Flood analysis module
+
+### 📋 Planned Capabilities
+
+#### Data Import
+- Multi-format support (GeoTIFF DEMs, Lidar LAS, GISDA shapefiles)
+- Parallel import processing
+- Incremental updates
+
+#### Disaster Analysis
+- **Flood hazard mapping** - Water level simulation, impact assessment
+- **Blast radius analysis** - Building damage, population impact
+- **Wildfire risk** - Vegetation modeling, spread prediction
+- **Evacuation routing** - Safe path finding, avoid hazard zones
+
+#### Visualization & API
+- Real-time web dashboard
+- REST API with Axum
+- Multi-layer map interface
+- Export to KML, Shapefile, GeoJSON
+
+#### Advanced Features
+- 3D terrain visualization
+- Temporal change detection
+- Network analysis (accessibility, centrality)
+- Resolution-adaptive queries
 
 ## Architecture
 
@@ -81,29 +124,78 @@ base/src/
 
 ## Quick Start
 
+**📖 See [FEATURES.md](FEATURES.md) for comprehensive feature documentation**
+
 ### Prerequisites
 
 - Rust 1.70+ ([Install Rust](https://rustup.rs/))
-- PostgreSQL 13+ with PostGIS 3.0+ (for database features)
-- GDAL 3.0+ (for geospatial data processing)
-- At least 8GB RAM
+- PostgreSQL 13+ with PostGIS 3.0+ (optional, for database features)
+- At least 4GB RAM (for direct viewing) or 8GB+ (for database import)
 
-### Current Usage
+### Option 1: Quick Visualization (No Database)
 
-#### Build the Project
-
-```bash
-cd OpenRustMap
-cargo build --release
-```
-
-#### Run Pathfinding
+Visualize OSM data instantly without database setup:
 
 ```bash
-./target/release/open_rust_map <pbf_file> <start_lat> <start_lon> <end_lat> <end_lon>
+# Build the viewer
+cargo build --release --bin pbf_view
+
+# Generate interactive map
+target/release/pbf_view \
+    --input sea-260124.osm.pbf \
+    --output map.html \
+    --features highway,building \
+    --bbox 47.6,-122.4,47.7,-122.2
+
+# Open in browser
+firefox map.html
 ```
 
-### Future Usage (After Implementation)
+**Best for:** Quick exploration, small/medium areas, no setup required
+
+### Option 2: Database Import (Production)
+
+For large datasets and complex queries:
+
+```bash
+# 1. Setup database (automated)
+./setup_database.sh
+./configure_postgres_password.sh
+
+# 2. Run migrations
+sqlx migrate run
+
+# 3. Import data (handles any size)
+./run_db_import.sh
+# or manually:
+cargo run --release --bin pbf_import -- --input sea-260124.osm.pbf
+
+# 4. Query your data
+psql -U postgres -d openrustmap -h localhost
+```
+
+**Best for:** Large datasets, repeated queries, multi-layer analysis
+
+### Option 3: Pathfinding
+
+Find shortest routes on road networks:
+
+```bash
+cargo run --release -- \
+    -i sea-260124.osm.pbf \
+    --start-lat 47.6062 \
+    --start-lon -122.3321 \
+    --end-lat 47.6205 \
+    --end-lon -122.3493
+```
+
+**Best for:** Route planning, navigation
+
+---
+
+## Installation
+
+### Automated Database Setup (Fedora)
 
 #### Install PostgreSQL and PostGIS
 
@@ -150,53 +242,191 @@ openrustmap import --file data/dem.tif
 openrustmap import --file data/provinces.shp
 ```
 
-#### Analyze Floods
+#### Analyze Floods (Coming Soon)
 
 ```bash
-openrustmap flood analyze \
+# Planned feature
+flood_analyzer \
   --water-level 5.0 \
   --bbox "100.0,13.0,101.0,14.0" \
   --output flood_5m.geojson
 ```
 
-## Database Schema (Planned)
+---
 
-### Core Tables
+## 🛠️ Tools & Commands Reference
+
+### Available Binaries
+
+| Tool | Purpose | Database? | Memory Usage |
+|------|---------|-----------|--------------|
+| `pbf_view` | Direct visualization | No | Medium |
+| `pbf_import` | Database import | Yes | Low |
+| `open_rust_map` | Pathfinding | No | High |
+
+### Quick Command Reference
+
+```bash
+# Visualize without database
+cargo run --release --bin pbf_view -- \
+    -i data.osm.pbf \
+    -o map.html \
+    --features highway,building \
+    --bbox MIN_LAT,MIN_LON,MAX_LAT,MAX_LON
+
+# Import to database
+cargo run --release --bin pbf_import -- \
+    -i data.osm.pbf \
+    --batch-size 5000
+
+# Find route
+cargo run --release -- \
+    -i data.osm.pbf \
+    --start-lat LAT1 --start-lon LON1 \
+    --end-lat LAT2 --end-lon LON2
+
+# Database queries
+psql -U postgres -d openrustmap -h localhost -c "
+SELECT osm_type, feature_type, COUNT(*)
+FROM osm_features
+GROUP BY osm_type, feature_type;
+"
+```
+
+### Setup Scripts
+
+```bash
+./setup_database.sh              # Complete database setup
+./configure_postgres_password.sh # Configure authentication
+./check.sh                       # Verify setup status
+./run_db_import.sh              # Automated import
+```
+
+### Tool Help
+
+```bash
+# Get detailed help for any tool
+cargo run --release --bin pbf_view -- --help
+cargo run --release --bin pbf_import -- --help
+cargo run --release -- --help
+```
+
+---
+
+## 📊 When to Use Each Tool
+
+### Use `pbf_view` when:
+- ✅ You want to visualize data quickly
+- ✅ Dataset is small to medium (city/district)
+- ✅ One-time exploration
+- ✅ No database setup available
+
+### Use `pbf_import` when:
+- ✅ Dataset is large (province/country)
+- ✅ You need repeated queries
+- ✅ Complex spatial analysis required
+- ✅ Multi-layer data integration
+
+### Use `open_rust_map` when:
+- ✅ You need route finding
+- ✅ Single pathfinding query
+- ✅ Testing routing algorithms
+
+---
+
+## Database Schema
+
+### ✅ Implemented Tables
 
 ```sql
 -- Track imported data sources
 CREATE TABLE data_sources (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    source_type TEXT NOT NULL,
-    file_format TEXT NOT NULL,
+    source_type TEXT NOT NULL,       -- 'osm', 'dem', 'lidar', 'gisda'
+    file_name TEXT NOT NULL,
+    file_path TEXT,
+    file_format TEXT NOT NULL,       -- 'pbf', 'geotiff', 'las', 'shp'
     import_date TIMESTAMPTZ DEFAULT NOW(),
-    metadata JSONB
+    bbox GEOMETRY(POLYGON, 4326),
+    metadata JSONB,
+    row_count BIGINT,
+    file_size_bytes BIGINT,
+    status TEXT DEFAULT 'imported'
 );
 
--- Store OSM features
+-- Store OSM features (nodes, ways, relations)
 CREATE TABLE osm_features (
     id BIGSERIAL PRIMARY KEY,
     osm_id BIGINT NOT NULL,
-    feature_type TEXT,
-    geom GEOMETRY(GEOMETRY, 4326),
-    tags JSONB
+    osm_type TEXT NOT NULL,          -- 'node', 'way', 'relation'
+    feature_type TEXT,               -- 'highway', 'building', 'waterway', etc.
+    geom GEOMETRY(GEOMETRY, 4326),   -- Point, LineString, Polygon
+    tags JSONB,
+    elevation DOUBLE PRECISION,
+    source_id UUID REFERENCES data_sources(id),
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Store elevation rasters
+-- Indexes for performance
+CREATE INDEX idx_osm_features_geom ON osm_features USING GIST(geom);
+CREATE INDEX idx_osm_features_type ON osm_features (feature_type);
+CREATE INDEX idx_osm_features_tags ON osm_features USING GIN(tags);
+```
+
+### 🔄 Ready for Data (Schema Created)
+
+```sql
+-- Elevation raster storage
 CREATE TABLE elevation_tiles (
     id BIGSERIAL PRIMARY KEY,
     rast RASTER,
-    resolution_meters DOUBLE PRECISION
+    resolution_meters DOUBLE PRECISION,
+    source_id UUID REFERENCES data_sources(id),
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Store flood analysis results
+-- Flood analysis results
 CREATE TABLE flood_zones (
     id BIGSERIAL PRIMARY KEY,
     scenario_name TEXT,
     water_level_meters DOUBLE PRECISION,
     geom GEOMETRY(MULTIPOLYGON, 4326),
-    affected_area_sqm DOUBLE PRECISION
+    affected_area_sqm DOUBLE PRECISION,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
+```
+
+### Example Queries
+
+```sql
+-- Count features by type
+SELECT osm_type, feature_type, COUNT(*)
+FROM osm_features
+GROUP BY osm_type, feature_type
+ORDER BY COUNT(*) DESC;
+
+-- Find all highways within 1km of a point
+SELECT osm_id, tags->>'name', ST_AsGeoJSON(geom)
+FROM osm_features
+WHERE feature_type LIKE 'highway%'
+AND ST_DWithin(
+    geom::geography,
+    ST_MakePoint(-122.3321, 47.6062)::geography,
+    1000
+);
+
+-- Buildings in a polygon
+SELECT osm_id, tags->>'name',
+       ST_Area(geom::geography) as area_m2
+FROM osm_features
+WHERE feature_type = 'building'
+AND ST_Within(geom, ST_GeomFromText('POLYGON(...)'));
+
+-- Intersection query (roads crossing polygon)
+SELECT COUNT(*)
+FROM osm_features
+WHERE feature_type LIKE 'highway%'
+AND ST_Intersects(geom, ST_GeomFromText('POLYGON(...)'));
 ```
 
 ## Development Guide
@@ -355,6 +585,65 @@ CREATE EXTENSION postgis;
 ## License
 
 MIT License - see LICENSE file for details
+
+---
+
+## 📍 Current Status (v0.1.0)
+
+### ✅ What Works Now
+
+1. **Direct Visualization** (`pbf_view`)
+   - Read PBF files without import
+   - Generate interactive HTML maps
+   - Filter by bbox and feature types
+   - Works on any system (no database needed)
+
+2. **Database Storage** (`pbf_import`)
+   - Stream PBF data to PostgreSQL
+   - Memory-efficient batch processing
+   - Handles unlimited dataset sizes
+   - Full spatial indexing with PostGIS
+
+3. **Pathfinding** (`open_rust_map`)
+   - A* algorithm on road networks
+   - Geodesic distance calculations
+   - GeoJSON route output
+
+4. **Infrastructure**
+   - Automated database setup scripts
+   - Schema migrations with sqlx
+   - Setup verification tools
+
+### 🎯 Next Steps
+
+**Immediate (Week 1-2):**
+- [ ] Web server for live visualization
+- [ ] DEM/elevation import tool
+- [ ] Basic flood analysis
+
+**Short-term (Month 1-2):**
+- [ ] Lidar point cloud support
+- [ ] Blast radius calculations
+- [ ] Multi-layer map interface
+
+**Medium-term (Month 3-6):**
+- [ ] REST API
+- [ ] Advanced disaster modeling
+- [ ] Report generation
+- [ ] Performance optimizations
+
+### 🚀 Try It Now
+
+```bash
+# Quick start - visualize data in 30 seconds
+git clone https://github.com/your-repo/OpenRustMap
+cd OpenRustMap
+cargo build --release --bin pbf_view
+target/release/pbf_view -i your_file.osm.pbf -o map.html
+firefox map.html
+```
+
+---
 
 ## Resources
 

@@ -7,8 +7,20 @@ edition = "2021"
 name = "open_rust_map"
 path = "src/main.rs"
 
+[[bin]]
+name = "pbf_import"
+path = "src/bin/pbf_import.rs"
+
+[[bin]]
+name = "pbf_view"
+path = "src/bin/pbf_view.rs"
+
+[[bin]]
+name = "pbf_dump"
+path = "src/bin/pbf_dump.rs"
+
 [dependencies]
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.4", features = ["derive", "env"] }
 geo = "0.26"
 geo-types = "0.7"
 hashbrown = "0.14"
@@ -18,3 +30,8 @@ petgraph = "0.6"
 rayon = "1.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }

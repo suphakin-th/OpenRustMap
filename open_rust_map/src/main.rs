@@ -169,27 +169,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file = File::open(&args.input)?;
     let mut pbf = OsmPbfReader::new(file);
     
-    // First pass: collect all nodes
-    info!("Collecting nodes...");
+    // First pass: collect ways and identify needed node IDs
+    info!("First pass: Collecting highway ways...");
     let progress_style = ProgressStyle::default_bar()
         .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
         .unwrap();
-    
-    let mut nodes = HashMap::new();
+
     let mut ways = Vec::new();
-    
-    // Process all objects
+    let mut needed_node_ids = HashSet::new();
+
     let progress = ProgressBar::new_spinner();
     progress.set_style(progress_style.clone());
-    
+
     for (i, obj) in pbf.iter().enumerate() {
         if i % 100000 == 0 {
-            progress.set_message(format!("Processed {} objects", i));
+            progress.set_message(format!("Pass 1: Processed {} objects", i));
             progress.inc(1);
         }
-        
-        match obj? {
-            OsmObj::Node(node) => {
+
+        if let Ok(OsmObj::Way(way)) = obj {
+            // Only keep ways that are roads/paths
+            if way.tags.contains_key("highway") {
+                // Collect node IDs needed for this way
+                for &node_id in &way.nodes {
+                    needed_node_ids.insert(node_id);
+                }
+                ways.push(way);
+            }
+        }
+    }
+    progress.finish_with_message(format!("Found {} highway ways using {} nodes", ways.len(), needed_node_ids.len()));
+    info!("Found {} highway ways using {} unique nodes", ways.len(), needed_node_ids.len());
+
+    // Second pass: collect only needed nodes
+    info!("Second pass: Loading required nodes...");
+    let file = File::open(&args.input)?;
+    let mut pbf = OsmPbfReader::new(file);
+
+    let mut nodes = HashMap::new();
+    let progress = ProgressBar::new(needed_node_ids.len() as u64);
+    progress.set_style(progress_style.clone());
+
+    for (i, obj) in pbf.iter().enumerate() {
+        if i % 100000 == 0 {
+            progress.set_message(format!("Pass 2: Processed {} objects", i));
+        }
+
+        if let Ok(OsmObj::Node(node)) = obj {
+            // Only store nodes that are needed for highways
+            if needed_node_ids.contains(&node.id) {
                 nodes.insert(
                     node.id,
                     Node {
@@ -198,46 +226,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         tags: node.tags,
                     },
                 );
+                progress.inc(1);
             }
-            OsmObj::Way(way) => {
-                // Only keep ways that are roads/paths
-                if way.tags.contains_key("highway") {
-                    ways.push(way);
-                }
-            }
-            _ => {}
         }
     }
-    progress.finish_with_message(format!("Collected {} nodes and {} ways", nodes.len(), ways.len()));
-    info!("Collected {} nodes and {} ways", nodes.len(), ways.len());
+    progress.finish_with_message(format!("Loaded {} nodes", nodes.len()));
+    info!("Loaded {} nodes for graph building", nodes.len());
     
     // Build graph
     info!("Building graph...");
     let mut graph = Graph::new();
-    
-    // First add all nodes that are part of ways
-    let mut way_nodes = HashSet::new();
-    for way in &ways {
-        for &node_id in &way.nodes {
-            way_nodes.insert(node_id);
-        }
-    }
-    debug!("Found {} unique nodes used in ways", way_nodes.len());
-    
-    // Add nodes to graph (only those used in ways)
-    let progress = ProgressBar::new(way_nodes.len() as u64);
+
+    // Add nodes to graph
+    let progress = ProgressBar::new(nodes.len() as u64);
     progress.set_style(progress_style.clone());
-    
-    for node_id in way_nodes {
-        if let Some(node) = nodes.get(&node_id) {
-            graph.add_node(node.clone());
-        } else {
-            warn!("Node {} referenced in way but not found in nodes collection", node_id.0);
-        }
+
+    for node in nodes.values() {
+        graph.add_node(node.clone());
         progress.inc(1);
     }
     progress.finish_with_message("Added nodes to graph");
-    info!("Added nodes to graph");
+    info!("Added {} nodes to graph", nodes.len());
     
     // Add edges
     info!("Adding edges...");
