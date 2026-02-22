@@ -78,6 +78,10 @@ struct Args {
     /// Run only geometry building (skip PBF scan)
     #[arg(long)]
     geometry_only: bool,
+
+    /// Skip node import and reuse existing _osm_way_nodes table (use after interrupted import)
+    #[arg(long)]
+    skip_nodes: bool,
 }
 
 #[tokio::main]
@@ -105,6 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         update_way_geometries_sql(&pool, args.geometry_chunk_size).await?;
         return Ok(());
     }
+
 
     // Full import requires input file
     let input = args
@@ -136,20 +141,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ---------------------------------------------------------------
     // Create lightweight node scratch table.
-    // UNLOGGED skips WAL — inserts are ~2x faster, no crash-safety needed
-    // since this table is rebuilt every import. Dropped after geometry build.
     // Stores only osm_id + point geometry (~33 bytes/row vs ~300 in osm_features).
+    // Dropped after geometry build.
+    // Use --skip-nodes to reuse an existing table from an interrupted import.
     // ---------------------------------------------------------------
-    info!("Creating _osm_way_nodes scratch table …");
-    sqlx::query(
-        "DROP TABLE IF EXISTS _osm_way_nodes;
-         CREATE UNLOGGED TABLE _osm_way_nodes (
-             osm_id BIGINT PRIMARY KEY,
-             geom   GEOMETRY(POINT, 4326) NOT NULL
-         );",
-    )
-    .execute(&pool)
-    .await?;
+    if args.skip_nodes {
+        info!("--skip-nodes: reusing existing _osm_way_nodes table …");
+    } else {
+        info!("Creating _osm_way_nodes scratch table …");
+        sqlx::query("DROP TABLE IF EXISTS _osm_way_nodes")
+            .execute(&pool)
+            .await?;
+        sqlx::query(
+            "CREATE TABLE _osm_way_nodes (
+                 osm_id BIGINT PRIMARY KEY,
+                 geom   GEOMETRY(POINT, 4326) NOT NULL
+             )",
+        )
+        .execute(&pool)
+        .await?;
+    }
 
     // ---------------------------------------------------------------
     // Single PBF scan: ways → osm_features, nodes → _osm_way_nodes
@@ -214,17 +225,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Ok(OsmObj::Node(node)) => {
-                node_batch.push((node.id.0, node.lon(), node.lat()));
-                total_nodes += 1;
+                if !args.skip_nodes {
+                    node_batch.push((node.id.0, node.lon(), node.lat()));
+                    total_nodes += 1;
 
-                if node_batch.len() >= args.batch_size {
-                    insert_node_batch(&pool, &node_batch).await?;
-                    progress.println(format!(
-                        "✓ nodes batch {} (total: {})",
-                        node_batch.len(),
-                        total_nodes
-                    ));
-                    node_batch.clear();
+                    if node_batch.len() >= args.batch_size {
+                        insert_node_batch(&pool, &node_batch).await?;
+                        progress.println(format!(
+                            "✓ nodes batch {} (total: {})",
+                            node_batch.len(),
+                            total_nodes
+                        ));
+                        node_batch.clear();
+                    }
                 }
             }
             _ => {}
@@ -246,7 +259,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         total_ways, total_nodes, skipped
     ));
 
-    // Index on _osm_way_nodes is the PRIMARY KEY (already created).
     // ANALYZE helps the geometry join planner.
     info!("Analyzing _osm_way_nodes …");
     sqlx::query("ANALYZE _osm_way_nodes").execute(&pool).await?;
@@ -254,7 +266,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---------------------------------------------------------------
     // Geometry building
     // ---------------------------------------------------------------
-    update_way_geometries_sql(&pool, args.geometry_chunk_size).await?;
+    let geom_built = update_way_geometries_sql(&pool, args.geometry_chunk_size).await?;
+    if geom_built == 0 && total_ways > 0 {
+        return Err("Geometry build produced 0 ways — _osm_way_nodes may have been truncated (laptop sleep during import?). Re-run the import.".into());
+    }
 
     // Drop the scratch table — reclaims all node storage
     info!("Dropping _osm_way_nodes scratch table …");
@@ -315,42 +330,52 @@ async fn insert_way_metadata_batch(
     batch: &[(i64, Option<String>, serde_json::Value, Vec<i64>)],
     source_id: uuid::Uuid,
 ) -> Result<(), sqlx::Error> {
-    let mut query_builder = sqlx::QueryBuilder::new(
-        "INSERT INTO osm_features (osm_id, osm_type, feature_type, tags, source_id) ",
-    );
+    // Use array parameters (unnest) instead of QueryBuilder push_values.
+    // QueryBuilder creates one bind param per field per row — at batch_size=100000
+    // that is 500,000 params, exceeding PostgreSQL's u16::MAX (65535) limit.
+    // With arrays we always have exactly 4 params regardless of batch size.
+    let osm_ids: Vec<i64> = batch.iter().map(|r| r.0).collect();
+    let feature_types: Vec<String> = batch
+        .iter()
+        .map(|(_, ht, _, _)| ht.as_deref().unwrap_or("highway").to_string())
+        .collect();
+    let tags: Vec<String> = batch
+        .iter()
+        .map(|(_, _, tags, node_ids)| {
+            let mut t = tags.clone();
+            if let serde_json::Value::Object(ref mut map) = t {
+                map.insert(
+                    "_node_refs".to_string(),
+                    serde_json::to_value(node_ids).unwrap(),
+                );
+            }
+            t.to_string()
+        })
+        .collect();
 
-    query_builder.push_values(batch, |mut b, (osm_id, highway_type, tags, node_ids)| {
-        let mut tags_with_nodes = tags.clone();
-        if let serde_json::Value::Object(ref mut map) = tags_with_nodes {
-            map.insert(
-                "_node_refs".to_string(),
-                serde_json::to_value(node_ids).unwrap(),
-            );
-        }
+    sqlx::query(
+        "INSERT INTO osm_features (osm_id, osm_type, feature_type, tags, source_id)
+         SELECT unnest($1::bigint[]), 'way', unnest($2::text[]), unnest($3::text[])::jsonb, $4
+         ON CONFLICT (osm_id, osm_type) DO UPDATE SET
+             feature_type = EXCLUDED.feature_type,
+             tags         = EXCLUDED.tags,
+             source_id    = EXCLUDED.source_id,
+             updated_at   = NOW()",
+    )
+    .bind(&osm_ids[..])
+    .bind(&feature_types[..])
+    .bind(&tags[..])
+    .bind(source_id)
+    .execute(pool)
+    .await?;
 
-        b.push_bind(osm_id)
-            .push_bind("way")
-            .push_bind(highway_type.as_deref().unwrap_or("highway"))
-            .push_bind(tags_with_nodes)
-            .push_bind(source_id);
-    });
-
-    query_builder.push(
-        " ON CONFLICT (osm_id, osm_type) DO UPDATE SET \
-         feature_type = EXCLUDED.feature_type, \
-         tags = EXCLUDED.tags, \
-         source_id = EXCLUDED.source_id, \
-         updated_at = NOW()",
-    );
-
-    query_builder.build().execute(pool).await?;
     Ok(())
 }
 
 async fn update_way_geometries_sql(
     pool: &PgPool,
     chunk_size: i64,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<u64, Box<dyn std::error::Error>> {
     info!("Building way geometries in chunks of {} …", chunk_size);
 
     let mut total_built: u64 = 0;
@@ -407,5 +432,5 @@ async fn update_way_geometries_sql(
     }
 
     info!("✓ Geometry complete: {} ways", total_built);
-    Ok(())
+    Ok(total_built)
 }

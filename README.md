@@ -81,6 +81,32 @@ OpenRustMap is a production-ready geospatial data platform for environmental ana
 
 ## Architecture
 
+### Architecture Decision Records (ADR)
+
+#### ADR-001: Node scratch table uses regular TABLE (not UNLOGGED)
+
+**Decision:** `_osm_way_nodes` is created as a regular `TABLE`, not `UNLOGGED TABLE`.
+
+**Context:** During PBF import, ~300M node coordinates are written to a temporary scratch table (`_osm_way_nodes`) for geometry building, then dropped. `UNLOGGED TABLE` offers ~2x faster inserts because it skips WAL (write-ahead log).
+
+**Problem:** PostgreSQL truncates `UNLOGGED` tables on crash recovery or unclean shutdown. On a laptop, sleeping during a 5+ hour import triggers this — the scratch table is wiped on resume, geometry build produces 0 ways, but the import reports success. The data is silently broken.
+
+**Resolution:** Use a regular `TABLE`. The import is ~30-60 min slower for Japan-sized datasets, but geometry is guaranteed to survive sleep/restart. The import also now returns an explicit error if geometry builds 0 ways when ways were imported.
+
+---
+
+#### ADR-002: Way batch inserts use array parameters (not QueryBuilder push_values)
+
+**Decision:** `insert_way_metadata_batch` uses `unnest($1::bigint[], $2::text[], $3::text[])` array parameters instead of `QueryBuilder::push_values`.
+
+**Context:** `QueryBuilder::push_values` creates one bind parameter per field per row. PostgreSQL's extended query protocol (used by sqlx prepared statements) limits parameters to u16::MAX = 65,535.
+
+**Problem:** At `batch_size=100,000` with 5 fields per way row: 100,000 × 5 = 500,000 parameters → panics with `assertion failed: self.param_types.len() <= (u16::MAX as usize)`. The old `batch_size=5,000` (5,000 × 5 = 25,000) accidentally stayed under the limit, masking the bug.
+
+**Resolution:** Use array parameters — always exactly 4 params regardless of batch size (`$1::bigint[]`, `$2::text[]`, `$3::text[]::jsonb`, `$4` uuid). Consistent with `insert_node_batch` which already used this pattern.
+
+---
+
 ### Design Pattern: Facade Pattern
 
 The project uses a facade design pattern for clean module organization:
