@@ -41,9 +41,16 @@ OpenRustMap is a production-ready geospatial data platform for environmental ana
 - ✅ **Setup verification** - Health check scripts
 - 🎨 **Facade pattern** - Clean modular architecture
 
+#### 5. Vector Tile Server (`tile_server`)
+- **WebGL rendering** - MapLibre GL JS, 10-30x faster than Leaflet/SVG
+- **Streaming tiles** - Only loads the area visible on screen
+- **PostGIS ST_AsMVT** - Server-side vector tile generation
+- **Axum HTTP server** - Lightweight async Rust web server
+- **Auto-fit to data** - Fetches bounding box and centers map on startup
+- **Click popups** - Feature type, name, OSM ID on click
+
 ### 🔄 In Progress
 
-- Web visualization server (Axum + Leaflet)
 - DEM/elevation data import
 - Flood analysis module
 
@@ -124,8 +131,6 @@ base/src/
 
 ## Quick Start
 
-**📖 See [FEATURES.md](FEATURES.md) for comprehensive feature documentation**
-
 ### Prerequisites
 
 - Rust 1.70+ ([Install Rust](https://rustup.rs/))
@@ -166,15 +171,36 @@ For large datasets and complex queries:
 sqlx migrate run
 
 # 3. Import data (handles any size)
-./run_db_import.sh
+./run_db_import.sh your_file.osm.pbf
 # or manually:
-cargo run --release --bin pbf_import -- --input sea-260124.osm.pbf
+cargo run --release --bin pbf_import -- --input your_file.osm.pbf
 
 # 4. Query your data
 psql -U postgres -d openrustmap -h localhost
 ```
 
 **Best for:** Large datasets, repeated queries, multi-layer analysis
+
+### Option 4: Vector Tile Server (Production)
+
+Fast WebGL map powered by PostGIS + MapLibre GL JS. Requires data already imported via `pbf_import`.
+
+```bash
+# Build
+cargo build --release --bin tile_server
+
+# Run (DATABASE_URL env var or --database-url flag)
+export DATABASE_URL="postgresql://postgres:yourpass@localhost/openrustmap"
+./target/release/tile_server --port 8080
+
+# Optional: apply geom_3857 migration for 40-80% faster tiles on large datasets
+sqlx migrate run
+
+# Open browser
+firefox http://localhost:8080
+```
+
+**Best for:** Large datasets, repeated viewing, best rendering performance
 
 ### Option 3: Pathfinding
 
@@ -260,8 +286,9 @@ flood_analyzer \
 
 | Tool | Purpose | Database? | Memory Usage |
 |------|---------|-----------|--------------|
-| `pbf_view` | Direct visualization | No | Medium |
+| `pbf_view` | Direct visualization (Leaflet HTML) | No | Medium |
 | `pbf_import` | Database import | Yes | Low |
+| `tile_server` | Vector tile server (MapLibre GL JS) | Yes | Low |
 | `open_rust_map` | Pathfinding | No | High |
 
 ### Quick Command Reference
@@ -296,10 +323,10 @@ GROUP BY osm_type, feature_type;
 ### Setup Scripts
 
 ```bash
-./setup_database.sh              # Complete database setup
-./configure_postgres_password.sh # Configure authentication
-./check.sh                       # Verify setup status
-./run_db_import.sh              # Automated import
+./setup_database.sh                          # Complete database setup
+./configure_postgres_password.sh             # Configure authentication
+./check.sh                                   # Verify setup status
+./run_db_import.sh <file.osm.pbf>           # Import PBF data (defaults to sea-260124.osm.pbf)
 ```
 
 ### Tool Help
@@ -508,10 +535,11 @@ cargo clippy      # Lint code
 - [ ] Add flood analysis command
 - [ ] Add data listing command
 
-### Phase 5: API & Visualization (Future)
-- [ ] Axum web framework integration
-- [ ] REST API endpoints
-- [ ] Leaflet frontend
+### Phase 5: API & Visualization
+- [x] Axum web framework integration (`tile_server`)
+- [x] Vector tile endpoint (PostGIS ST_AsMVT)
+- [x] MapLibre GL JS WebGL frontend
+- [ ] Full REST API endpoints
 - [ ] Real-time monitoring
 
 ## Project Structure
@@ -542,7 +570,12 @@ OpenRustMap/
     └── src/
         ├── main.rs
         ├── app.rs
-        └── model.rs
+        ├── model.rs
+        └── bin/
+            ├── pbf_view.rs
+            ├── pbf_import.rs
+            ├── pbf_dump.rs
+            └── tile_server.rs
 ```
 
 ## Troubleshooting

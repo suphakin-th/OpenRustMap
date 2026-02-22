@@ -19,6 +19,10 @@ path = "src/bin/pbf_view.rs"
 name = "pbf_dump"
 path = "src/bin/pbf_dump.rs"
 
+[[bin]]
+name = "tile_server"
+path = "src/bin/tile_server.rs"
+
 [dependencies]
 clap = { version = "4.4", features = ["derive", "env"] }
 geo = "0.26"
@@ -33,5 +37,8 @@ tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["v4", "serde"] }
+axum = { version = "0.7", features = ["http1", "tokio"] }
+tower-http = { version = "0.5", features = ["cors"] }
