@@ -650,7 +650,7 @@ MIT License - see LICENSE file for details
 ### 🎯 Next Steps
 
 **Immediate (Week 1-2):**
-- [ ] Web server for live visualization
+- [x] Vector tile server (`tile_server` — Axum + PostGIS ST_AsMVT + MapLibre GL JS)
 - [ ] DEM/elevation import tool
 - [ ] Basic flood analysis
 

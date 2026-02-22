@@ -1,8 +1,8 @@
 use crate::configuration::DatabaseSettings;
 use crate::error::Error;
-use sqlx::postgres::{PgPoolOptions, PgPool};
+use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::time::Duration;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 /// Create a PostgreSQL connection pool
 pub async fn create_pool(settings: &DatabaseSettings) -> Result<PgPool, Error> {

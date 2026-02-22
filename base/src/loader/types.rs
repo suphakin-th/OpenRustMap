@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use geo_types::Geometry;
+use serde::{Deserialize, Serialize};
 
 /// Types of data sources
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -66,7 +66,12 @@ pub struct BoundingBox {
 
 impl BoundingBox {
     pub fn new(west: f64, south: f64, east: f64, north: f64) -> Self {
-        Self { west, south, east, north }
+        Self {
+            west,
+            south,
+            east,
+            north,
+        }
     }
 
     pub fn center(&self) -> (f64, f64) {

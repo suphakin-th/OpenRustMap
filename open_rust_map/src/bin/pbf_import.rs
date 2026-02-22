@@ -1,20 +1,33 @@
-use std::fs::File;
 use clap::Parser;
-use std::path::PathBuf;
-use osmpbfreader::{OsmPbfReader, OsmObj};
 use indicatif::{ProgressBar, ProgressStyle};
-use tracing::info;
-use sqlx::{PgPool, postgres::PgPoolOptions};
+use osmpbfreader::{OsmObj, OsmPbfReader};
 use serde_json::json;
+use sqlx::{postgres::PgPoolOptions, PgPool};
+use std::fs::File;
+use std::path::PathBuf;
+use tracing::info;
 
 /// Allowed highway types: free public roads/paths for walking, cycling, driving
 const ALLOWED_HIGHWAY_TYPES: &[&str] = &[
     // Vehicle roads
-    "primary", "secondary", "tertiary",
-    "primary_link", "secondary_link", "tertiary_link",
-    "residential", "living_street", "unclassified", "service", "road",
+    "primary",
+    "secondary",
+    "tertiary",
+    "primary_link",
+    "secondary_link",
+    "tertiary_link",
+    "residential",
+    "living_street",
+    "unclassified",
+    "service",
+    "road",
     // Walking / cycling / mixed paths
-    "footway", "path", "cycleway", "pedestrian", "steps", "bridleway",
+    "footway",
+    "path",
+    "cycleway",
+    "pedestrian",
+    "steps",
+    "bridleway",
     // Unpaved / rural
     "track",
 ];
@@ -85,18 +98,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // --geometry-only: just build geometries, no PBF scan
     if args.geometry_only {
-        info!("Geometry-only mode: building way geometries in chunks of {} …", args.geometry_chunk_size);
+        info!(
+            "Geometry-only mode: building way geometries in chunks of {} …",
+            args.geometry_chunk_size
+        );
         update_way_geometries_sql(&pool, args.geometry_chunk_size).await?;
         return Ok(());
     }
 
     // Full import requires input file
-    let input = args.input.as_ref()
+    let input = args
+        .input
+        .as_ref()
         .ok_or("--input is required (use --geometry-only to skip PBF scan)")?;
 
     // Create data source record
     let filename = input.file_name().unwrap().to_string_lossy().to_string();
-    let file_path = input.canonicalize()
+    let file_path = input
+        .canonicalize()
         .ok()
         .and_then(|p| p.to_str().map(|s| s.to_string()));
 
@@ -118,7 +137,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---------------------------------------------------------------
     // Single PBF scan: ways + nodes in one pass
     // ---------------------------------------------------------------
-    info!("Scanning PBF: ways + nodes in single pass (batch size: {}) …", args.batch_size);
+    info!(
+        "Scanning PBF: ways + nodes in single pass (batch size: {}) …",
+        args.batch_size
+    );
 
     let file = File::open(input)?;
     let mut pbf = OsmPbfReader::new(file);
@@ -180,7 +202,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if node_batch.len() >= args.batch_size {
                     insert_node_batch(&pool, &node_batch, source_id).await?;
-                    info!("✓ nodes batch {} (total: {})", node_batch.len(), total_nodes);
+                    info!(
+                        "✓ nodes batch {} (total: {})",
+                        node_batch.len(),
+                        total_nodes
+                    );
                     node_batch.clear();
                 }
             }
@@ -206,7 +232,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ---------------------------------------------------------------
     // Geometry building
     // ---------------------------------------------------------------
-    info!("Building way geometries in chunks of {} …", args.geometry_chunk_size);
+    info!(
+        "Building way geometries in chunks of {} …",
+        args.geometry_chunk_size
+    );
     update_way_geometries_sql(&pool, args.geometry_chunk_size).await?;
 
     // Update data source status
@@ -224,7 +253,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .execute(&pool)
     .await?;
 
-    info!("Import complete! {} ways + {} nodes", total_ways, total_nodes);
+    info!(
+        "Import complete! {} ways + {} nodes",
+        total_ways, total_nodes
+    );
     Ok(())
 }
 
@@ -236,7 +268,10 @@ async fn insert_node_batch(
     let ids: Vec<i64> = batch.iter().map(|r| r.0).collect();
     let lons: Vec<f64> = batch.iter().map(|r| r.1).collect();
     let lats: Vec<f64> = batch.iter().map(|r| r.2).collect();
-    let tags: Vec<String> = batch.iter().map(|r| serde_json::to_string(&r.3).unwrap()).collect();
+    let tags: Vec<String> = batch
+        .iter()
+        .map(|r| serde_json::to_string(&r.3).unwrap())
+        .collect();
 
     sqlx::query(
         "WITH input AS (
@@ -273,13 +308,16 @@ async fn insert_way_metadata_batch(
     source_id: uuid::Uuid,
 ) -> Result<(), sqlx::Error> {
     let mut query_builder = sqlx::QueryBuilder::new(
-        "INSERT INTO osm_features (osm_id, osm_type, feature_type, tags, source_id) "
+        "INSERT INTO osm_features (osm_id, osm_type, feature_type, tags, source_id) ",
     );
 
     query_builder.push_values(batch, |mut b, (osm_id, highway_type, tags, node_ids)| {
         let mut tags_with_nodes = tags.clone();
         if let serde_json::Value::Object(ref mut map) = tags_with_nodes {
-            map.insert("_node_refs".to_string(), serde_json::to_value(node_ids).unwrap());
+            map.insert(
+                "_node_refs".to_string(),
+                serde_json::to_value(node_ids).unwrap(),
+            );
         }
 
         b.push_bind(osm_id)
@@ -294,7 +332,7 @@ async fn insert_way_metadata_batch(
          feature_type = EXCLUDED.feature_type, \
          tags = EXCLUDED.tags, \
          source_id = EXCLUDED.source_id, \
-         updated_at = NOW()"
+         updated_at = NOW()",
     );
 
     query_builder.build().execute(pool).await?;
@@ -354,7 +392,10 @@ async fn update_way_geometries_sql(
         }
 
         total_built += built;
-        info!("  chunk {}: {} geometries (total: {})", chunk_num, built, total_built);
+        info!(
+            "  chunk {}: {} geometries (total: {})",
+            chunk_num, built, total_built
+        );
     }
 
     info!("✓ Geometry complete: {} ways", total_built);

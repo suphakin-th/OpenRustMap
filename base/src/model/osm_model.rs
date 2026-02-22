@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Osm {
-	pub nodes: HashMap<i64, Node>,
-	pub ways: HashMap<i64, Way>,
-	pub relations: HashMap<i64, Relation>,
+    pub nodes: HashMap<i64, Node>,
+    pub ways: HashMap<i64, Way>,
+    pub relations: HashMap<i64, Relation>,
 }

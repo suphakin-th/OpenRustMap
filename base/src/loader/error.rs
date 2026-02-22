@@ -1,4 +1,4 @@
-use snafu::{Snafu, Report};
+use snafu::{Report, Snafu};
 
 /// Loader-specific errors
 #[derive(Debug, Snafu)]

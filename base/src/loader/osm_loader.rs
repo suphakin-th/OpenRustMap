@@ -28,9 +28,7 @@ pub struct OsmLoader {
 impl OsmLoader {
     /// Create a new OSM loader with default batch size
     pub fn new() -> Self {
-        Self {
-            batch_size: 10_000,
-        }
+        Self { batch_size: 10_000 }
     }
 
     /// Create a new OSM loader with custom batch size
@@ -42,7 +40,10 @@ impl OsmLoader {
     fn tags_to_json(tags: &osmpbfreader::Tags) -> serde_json::Value {
         let mut map = serde_json::Map::new();
         for (key, value) in tags.iter() {
-            map.insert(key.to_string(), serde_json::Value::String(value.to_string()));
+            map.insert(
+                key.to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
         }
         serde_json::Value::Object(map)
     }
@@ -51,8 +52,8 @@ impl OsmLoader {
     fn extract_feature_type(tags: &osmpbfreader::Tags) -> Result<String, LoadError> {
         // Priority order for feature type extraction
         let priority_keys = [
-            "highway", "building", "waterway", "railway", "landuse",
-            "natural", "amenity", "leisure", "shop", "tourism"
+            "highway", "building", "waterway", "railway", "landuse", "natural", "amenity",
+            "leisure", "shop", "tourism",
         ];
 
         for key in &priority_keys {
@@ -146,7 +147,10 @@ impl DataLoader for OsmLoader {
                 OsmObj::Node(node) => {
                     nodes.insert(
                         node.id,
-                        Point::new(node.decimicro_lon as f64 / 1e7, node.decimicro_lat as f64 / 1e7),
+                        Point::new(
+                            node.decimicro_lon as f64 / 1e7,
+                            node.decimicro_lat as f64 / 1e7,
+                        ),
                     );
                     node_count += 1;
 
@@ -156,9 +160,15 @@ impl DataLoader for OsmLoader {
 
                         // Add metadata
                         if let serde_json::Value::Object(ref mut map) = properties {
-                            map.insert("osm_type".to_string(), serde_json::Value::String("node".to_string()));
+                            map.insert(
+                                "osm_type".to_string(),
+                                serde_json::Value::String("node".to_string()),
+                            );
                             if let Ok(ft) = Self::extract_feature_type(&node.tags) {
-                                map.insert("feature_type".to_string(), serde_json::Value::String(ft));
+                                map.insert(
+                                    "feature_type".to_string(),
+                                    serde_json::Value::String(ft),
+                                );
                             }
                         }
 
@@ -197,9 +207,15 @@ impl DataLoader for OsmLoader {
 
                         // Add metadata
                         if let serde_json::Value::Object(ref mut map) = properties {
-                            map.insert("osm_type".to_string(), serde_json::Value::String("way".to_string()));
+                            map.insert(
+                                "osm_type".to_string(),
+                                serde_json::Value::String("way".to_string()),
+                            );
                             if let Ok(ft) = Self::extract_feature_type(&way.tags) {
-                                map.insert("feature_type".to_string(), serde_json::Value::String(ft));
+                                map.insert(
+                                    "feature_type".to_string(),
+                                    serde_json::Value::String(ft),
+                                );
                             }
                         }
 
@@ -258,7 +274,7 @@ impl DataLoader for OsmLoader {
         // Check for empty dataset
         if data.features.is_empty() {
             return Ok(ValidationReport::invalid(vec![
-                "No features found in OSM file".to_string()
+                "No features found in OSM file".to_string(),
             ]));
         }
 
@@ -377,18 +393,23 @@ impl DataLoader for OsmLoader {
                     Ok(json) => json,
                     Err(e) => {
                         warn!("Skipping feature {:?}: {}", feature.id, e);
-                        errors.push(format!("feature {:?}: geometry serialization failed", feature.id));
+                        errors.push(format!(
+                            "feature {:?}: geometry serialization failed",
+                            feature.id
+                        ));
                         continue;
                     }
                 };
 
                 // Extract osm_type and feature_type from properties
-                let osm_type = feature.properties
+                let osm_type = feature
+                    .properties
                     .get("osm_type")
                     .and_then(|v| v.as_str())
                     .unwrap_or("node");
 
-                let feature_type_opt = feature.properties
+                let feature_type_opt = feature
+                    .properties
                     .get("feature_type")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
@@ -398,7 +419,7 @@ impl DataLoader for OsmLoader {
                     r#"
                     INSERT INTO osm_features (osm_id, osm_type, feature_type, geom, tags, source_id)
                     VALUES ($1, $2, $3, ST_GeomFromGeoJSON($4), $5, $6)
-                    "#
+                    "#,
                 )
                 .bind(feature.id.unwrap_or(0))
                 .bind(osm_type)

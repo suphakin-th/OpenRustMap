@@ -32,7 +32,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file = std::fs::File::open(&args.input)?;
     let mut pbf = OsmPbfReader::new(file);
 
-    let limit = if args.limit == 0 { usize::MAX } else { args.limit };
+    let limit = if args.limit == 0 {
+        usize::MAX
+    } else {
+        args.limit
+    };
     let mut count = 0u64;
     let mut printed = 0usize;
 
@@ -72,21 +76,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    println!("\n=== Total objects scanned: {} | Printed: {} ===", count, printed);
+    println!(
+        "\n=== Total objects scanned: {} | Printed: {} ===",
+        count, printed
+    );
     Ok(())
 }
 
 fn print_obj(obj: &OsmObj) {
     match obj {
         OsmObj::Node(node) => {
-            println!("NODE id={} lat={:.6} lon={:.6}", node.id.0, node.lat(), node.lon());
+            println!(
+                "NODE id={} lat={:.6} lon={:.6}",
+                node.id.0,
+                node.lat(),
+                node.lon()
+            );
             print_tags(&node.tags);
         }
         OsmObj::Way(way) => {
             println!("WAY id={} ({} nodes)", way.id.0, way.nodes.len());
             print_tags(&way.tags);
             if !way.nodes.is_empty() {
-                let refs: Vec<String> = way.nodes.iter().take(10).map(|n| n.0.to_string()).collect();
+                let refs: Vec<String> =
+                    way.nodes.iter().take(10).map(|n| n.0.to_string()).collect();
                 let suffix = if way.nodes.len() > 10 { " ..." } else { "" };
                 println!("  refs: [{}{}]", refs.join(", "), suffix);
             }
@@ -95,7 +108,10 @@ fn print_obj(obj: &OsmObj) {
             println!("RELATION id={} ({} members)", rel.id.0, rel.refs.len());
             print_tags(&rel.tags);
             for (i, member) in rel.refs.iter().take(10).enumerate() {
-                println!("  member[{}]: {:?} role=\"{}\"", i, member.member, member.role);
+                println!(
+                    "  member[{}]: {:?} role=\"{}\"",
+                    i, member.member, member.role
+                );
             }
             if rel.refs.len() > 10 {
                 println!("  ... and {} more members", rel.refs.len() - 10);

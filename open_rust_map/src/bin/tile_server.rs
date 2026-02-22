@@ -15,7 +15,10 @@ use tracing::{error, info};
 
 /// Vector tile server for OpenRustMap — serves PostGIS ST_AsMVT tiles to MapLibre GL JS
 #[derive(Parser, Debug)]
-#[command(version, about = "Serve vector tiles from PostGIS via Axum + MapLibre GL JS")]
+#[command(
+    version,
+    about = "Serve vector tiles from PostGIS via Axum + MapLibre GL JS"
+)]
 struct Args {
     /// PostgreSQL connection URL
     #[arg(long, env = "DATABASE_URL")]
@@ -38,7 +41,7 @@ struct AppState {
 // ---------------------------------------------------------------------------
 // MapLibre GL JS frontend — served as a static HTML string
 // ---------------------------------------------------------------------------
-const INDEX_HTML: &str = r#"<!DOCTYPE html>
+const INDEX_HTML: &str = r##"<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -228,7 +231,7 @@ async function init() {
 init();
 </script>
 </body>
-</html>"#;
+</html>"##;
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -329,12 +332,7 @@ async fn serve_tile(
 }
 
 /// Query PostGIS for a single MVT tile using ST_AsMVT + ST_TileEnvelope.
-async fn fetch_tile(
-    pool: &PgPool,
-    z: i32,
-    x: i32,
-    y: i32,
-) -> Result<Option<Vec<u8>>, sqlx::Error> {
+async fn fetch_tile(pool: &PgPool, z: i32, x: i32, y: i32) -> Result<Option<Vec<u8>>, sqlx::Error> {
     // The GIST index on geom (SRID 4326) is used by the ST_Intersects predicate.
     // ST_AsMVTGeom clips and projects features into tile pixel space (0..4096).
     // COALESCE(geom_3857, ST_Transform(...)) uses the pre-projected column from
@@ -401,8 +399,10 @@ struct MetadataResponse {
     tile_url_template: String,
 }
 
+type BoundsRow = (Option<f64>, Option<f64>, Option<f64>, Option<f64>, i64);
+
 async fn serve_metadata(State(state): State<AppState>) -> Response {
-    let row: Result<(Option<f64>, Option<f64>, Option<f64>, Option<f64>, i64), sqlx::Error> =
+    let row: Result<BoundsRow, sqlx::Error> =
         sqlx::query_as(
             r#"
             SELECT

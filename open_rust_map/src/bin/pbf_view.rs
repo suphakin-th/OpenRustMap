@@ -74,7 +74,8 @@ struct BBox {
 
 impl BBox {
     fn from_string(s: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let p: Vec<f64> = s.split(',')
+        let p: Vec<f64> = s
+            .split(',')
             .map(|v| v.trim().parse())
             .collect::<Result<_, _>>()?;
         if p.len() != 4 {
@@ -160,10 +161,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Total features: {}", all_features.len());
 
     // --- render ----------------------------------------------------------
-    let (center_lat, center_lon) = bbox
-        .as_ref()
-        .map(|b| b.center())
-        .unwrap_or((15.87, 100.99)); // Thailand default
+    let (center_lat, center_lon) = bbox.as_ref().map(|b| b.center()).unwrap_or((15.87, 100.99)); // Thailand default
 
     let geojson = json!({ "type": "FeatureCollection", "features": all_features });
 
@@ -172,7 +170,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         args.input
             .as_ref()
-            .map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string())
+            .map(|p| {
+                p.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            })
             .unwrap_or_default()
     };
 
@@ -313,7 +316,10 @@ fn load_from_pbf(
     }
 
     if bbox.is_none() {
-        info!("No --bbox: loading entire file (limited to {} features).", args.limit);
+        info!(
+            "No --bbox: loading entire file (limited to {} features).",
+            args.limit
+        );
     }
 
     let all_highways = features.iter().any(|f| f == "highway");

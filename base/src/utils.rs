@@ -13,12 +13,12 @@ pub fn read_pbf_file(filename: &str) -> osmpbfreader::OsmPbfReader<std::fs::File
 }
 
 pub fn time_diff_trace(text: &str, from: OffsetDateTime, to: OffsetDateTime) {
-	let diff = to - from;
-	tracing::info!(
-		"{} in {} hours, {} minutes, and {} seconds",
-		text,
-		diff.whole_hours(),
-		diff.whole_minutes() % 60,
-		diff.whole_seconds() % 60
-	);
+    let diff = to - from;
+    tracing::info!(
+        "{} in {} hours, {} minutes, and {} seconds",
+        text,
+        diff.whole_hours(),
+        diff.whole_minutes() % 60,
+        diff.whole_seconds() % 60
+    );
 }
