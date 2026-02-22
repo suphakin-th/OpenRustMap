@@ -35,7 +35,7 @@ echo "  File: $PBF_FILE"
 echo ""
 echo "This will:"
 echo "  - Stream PBF data directly to PostgreSQL"
-echo "  - Process in batches (5000 rows at a time)"
+echo "  - Process in batches (100000 rows at a time)"
 echo "  - Use minimal RAM (only batch size in memory)"
 echo "  - Can handle datasets of ANY size"
 echo ""
@@ -47,8 +47,7 @@ fi
 
 # Run the import
 time cargo run --release --bin pbf_import -- \
-    --input "$PBF_FILE" \
-    --batch-size 5000
+    --input "$PBF_FILE"
 
 echo ""
 echo -e "${GREEN}=== Import Complete! ===${NC}"

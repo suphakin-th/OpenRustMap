@@ -298,8 +298,7 @@ cargo run --release --bin pbf_view -- \
 
 # Import to database
 cargo run --release --bin pbf_import -- \
-    -i data.osm.pbf \
-    --batch-size 5000
+    -i data.osm.pbf
 
 # Find route
 cargo run --release -- \
