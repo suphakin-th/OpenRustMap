@@ -24,10 +24,10 @@ OpenRustMap is a production-ready geospatial data platform for environmental ana
 
 #### 2. Database-Backed Storage (`pbf_import`)
 - 📦 **Streaming import** - Handles unlimited dataset sizes
-- 🗄️ **PostgreSQL + PostGIS** - Full spatial database
-- 🚀 **Spatial indexing** - GIST indexes for fast queries
-- 💪 **Memory efficient** - Batch processing (configurable)
-- 🔍 **Advanced queries** - Complex spatial operations
+- 🛣️ **Highway ways only** - Imports public roads/paths (filtered by access/toll)
+- 🗄️ **PostgreSQL + PostGIS** - Full spatial database with GIST spatial indexes
+- 💪 **Memory efficient** - Nodes stored in a temporary scratch table during import, then dropped
+- 🔍 **Advanced queries** - Complex spatial operations via PostGIS
 
 #### 3. Pathfinding (`open_rust_map`)
 - 🗺️ **A* algorithm** - Geodesic distance heuristic
@@ -181,7 +181,7 @@ psql -U postgres -d openrustmap -h localhost
 
 **Best for:** Large datasets, repeated queries, multi-layer analysis
 
-### Option 4: Vector Tile Server (Production)
+### Option 3: Vector Tile Server (Production)
 
 Fast WebGL map powered by PostGIS + MapLibre GL JS. Requires data already imported via `pbf_import`.
 
@@ -202,7 +202,7 @@ firefox http://localhost:8080
 
 **Best for:** Large datasets, repeated viewing, best rendering performance
 
-### Option 3: Pathfinding
+### Option 4: Pathfinding
 
 Find shortest routes on road networks:
 
@@ -258,24 +258,19 @@ DATABASE_NAME=openrustmap
 #### Import Data
 
 ```bash
-# Import OSM data
-openrustmap import --file data/thailand.osm.pbf
+# Run migrations first
+sqlx migrate run
 
-# Import elevation data
-openrustmap import --file data/dem.tif
-
-# Import GISDA shapefiles
-openrustmap import --file data/provinces.shp
+# Import OSM PBF data
+./run_db_import.sh your_file.osm.pbf
+# or manually:
+cargo run --release --bin pbf_import -- --input your_file.osm.pbf
 ```
 
 #### Analyze Floods (Coming Soon)
 
 ```bash
-# Planned feature
-flood_analyzer \
-  --water-level 5.0 \
-  --bbox "100.0,13.0,101.0,14.0" \
-  --output flood_5m.geojson
+# Planned feature — not yet implemented
 ```
 
 ---
@@ -381,17 +376,19 @@ CREATE TABLE data_sources (
     status TEXT DEFAULT 'imported'
 );
 
--- Store OSM features (nodes, ways, relations)
+-- Store OSM highway ways (imported by pbf_import)
 CREATE TABLE osm_features (
     id BIGSERIAL PRIMARY KEY,
     osm_id BIGINT NOT NULL,
-    osm_type TEXT NOT NULL,          -- 'node', 'way', 'relation'
-    feature_type TEXT,               -- 'highway', 'building', 'waterway', etc.
-    geom GEOMETRY(GEOMETRY, 4326),   -- Point, LineString, Polygon
+    osm_type TEXT NOT NULL,          -- 'way' (nodes are temporary during import only)
+    feature_type TEXT,               -- 'highway', 'residential', 'footway', etc.
+    geom GEOMETRY(GEOMETRY, 4326),   -- LineString (built after import)
     tags JSONB,
     elevation DOUBLE PRECISION,
     source_id UUID REFERENCES data_sources(id),
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (osm_id, osm_type)
 );
 
 -- Indexes for performance
@@ -512,7 +509,7 @@ cargo clippy      # Lint code
 ## Implementation Roadmap
 
 ### Phase 1: Database Foundation
-- [ ] Create database migration system
+- [x] Create database migration system
 - [ ] Implement connection pooling
 - [ ] Create `db.rs` facade with repository pattern
 - [ ] Add database configuration to `configuration/`
@@ -647,6 +644,12 @@ MIT License - see LICENSE file for details
    - Schema migrations with sqlx
    - Setup verification tools
 
+5. **Vector Tile Server** (`tile_server`)
+   - WebGL rendering via MapLibre GL JS
+   - PostGIS ST_AsMVT tile generation
+   - Axum HTTP server
+   - Auto-fit map to imported data bounds
+
 ### 🎯 Next Steps
 
 **Immediate (Week 1-2):**
@@ -672,7 +675,7 @@ MIT License - see LICENSE file for details
 git clone https://github.com/your-repo/OpenRustMap
 cd OpenRustMap
 cargo build --release --bin pbf_view
-target/release/pbf_view -i your_file.osm.pbf -o map.html
+cargo run --release --bin pbf_view -- -i your_file.osm.pbf -o map.html
 firefox map.html
 ```
 

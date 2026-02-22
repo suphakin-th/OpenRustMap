@@ -402,9 +402,8 @@ struct MetadataResponse {
 type BoundsRow = (Option<f64>, Option<f64>, Option<f64>, Option<f64>, i64);
 
 async fn serve_metadata(State(state): State<AppState>) -> Response {
-    let row: Result<BoundsRow, sqlx::Error> =
-        sqlx::query_as(
-            r#"
+    let row: Result<BoundsRow, sqlx::Error> = sqlx::query_as(
+        r#"
             SELECT
               ST_XMin(ST_Extent(geom))::double precision,
               ST_YMin(ST_Extent(geom))::double precision,
@@ -415,9 +414,9 @@ async fn serve_metadata(State(state): State<AppState>) -> Response {
             WHERE geom IS NOT NULL
               AND osm_type = 'way'
             "#,
-        )
-        .fetch_one(&state.pool)
-        .await;
+    )
+    .fetch_one(&state.pool)
+    .await;
 
     match row {
         Ok((min_x, min_y, max_x, max_y, count)) => {
