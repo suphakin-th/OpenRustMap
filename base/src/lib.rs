@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod configuration;
 pub mod db;
 pub mod error;
