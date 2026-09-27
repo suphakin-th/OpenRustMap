@@ -478,8 +478,8 @@ mod tests {
     #[test]
     fn test_tags_to_json() {
         let mut tags = osmpbfreader::Tags::new();
-        tags.insert("highway".to_string(), "residential".to_string());
-        tags.insert("name".to_string(), "Main Street".to_string());
+        tags.insert("highway".to_string().into(), "residential".to_string().into());
+        tags.insert("name".to_string().into(), "Main Street".to_string().into());
 
         let json = OsmLoader::tags_to_json(&tags);
         assert_eq!(json["highway"], "residential");
