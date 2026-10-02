@@ -137,3 +137,24 @@ pub struct ScenarioResult {
     pub computed_at: time::OffsetDateTime,
     pub duration_seconds: f64,
 }
+
+/// One point-in-time water-level reading at one location, produced by a
+/// `TileGrid` hazard run (flood, wildfire-equivalent intensity, etc.).
+///
+/// This is the unit the "how did the water level change over time at this
+/// spot" question is actually answered from — a `ScenarioResult`'s
+/// `intensity_field` is the whole-map picture at one instant; a flood
+/// analyzer that wants a per-point timeline writes one `WaterLevelSample`
+/// per (location, timestep) it computes, in addition to (not instead of)
+/// its final `ScenarioResult`. The two are stored in different tables
+/// (`scenario_snapshots` vs. `water_level_timeseries`) because they answer
+/// different questions and need different indexes to answer them fast.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaterLevelSample {
+    pub scenario_name: String,
+    pub lat: f64,
+    pub lon: f64,
+    pub observed_at: time::OffsetDateTime,
+    pub water_level_m: f64,
+    pub confidence: DataConfidence,
+}
