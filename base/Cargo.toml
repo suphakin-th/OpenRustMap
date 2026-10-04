@@ -5,7 +5,7 @@ edition = "2021"
 
 [features]
 default = []
-gdal-support = ["gdal", "gdal-sys"]
+gdal-support = ["gdal"]
 lidar-support = ["las"]
 
 [dependencies]
@@ -17,8 +17,22 @@ config = { version = "0.13.2", default-features = false, features = ["toml"] }
 futures = "0.3"
 
 # Geospatial processing - All open source
-gdal = { version = "0.16", optional = true }
-gdal-sys = { version = "0.9", optional = true }
+# Bumped from 0.16 (original) to 0.19 -- 0.16's bundled gdal-sys 0.9 only
+# ships pre-built bindings up to older GDAL versions and panics at build
+# time against the GDAL 3.10.3 this project's Docker build environment
+# actually has (`apt install libgdal-dev` on Debian trixie). gdal 0.19's
+# gdal-sys ships pre-built bindings for GDAL 3.8-3.13, covering 3.10.3
+# without needing the bindgen feature (which would require libclang
+# installed everywhere this ever builds -- a much heavier, more fragile
+# requirement to carry long-term versus just tracking a current release).
+#
+# gdal-sys is NOT pinned separately here -- it's a transitive dependency
+# `gdal` already manages (via cargo's `links = "gdal"` native-library
+# uniqueness rule, only one version can exist in the graph at all), and an
+# explicit pin here previously caused `cargo build` to fail outright with
+# a version-resolution conflict against whatever gdal-sys version 0.19
+# actually wants.
+gdal = { version = "0.19", optional = true }
 geo = "0.26"
 geo-types = "0.7"
 geojson = "0.24"
