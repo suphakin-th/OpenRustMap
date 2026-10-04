@@ -138,6 +138,153 @@ pub struct ScenarioResult {
     pub duration_seconds: f64,
 }
 
+/// How deep standing water is, in the same coarse, body-relative buckets a
+/// person on the ground actually judges depth by — not a number they'd
+/// have to guess in centimetres. Mirrors the dry/ankle/knee/waist/chest
+/// picker pattern seen in comparable crowd flood-reporting tools (e.g.
+/// K.A.R.A.'s Bangkok app), which turns out to be the right UX precedent:
+/// false precision ("37cm") from a layperson's glance is worse than an
+/// honest coarse bucket. `approx_m` gives each bucket a representative
+/// depth so it can still be plotted on the same scale as a simulated
+/// `WaterLevelSample` in metres.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WaterLevelBucket {
+    Dry,
+    Ankle,
+    Knee,
+    Waist,
+    Chest,
+}
+
+impl WaterLevelBucket {
+    /// Representative depth in metres for this bucket — approximate by
+    /// construction (see the type's own doc comment); never treat this as
+    /// a precise measurement on par with a gauge reading or DEM sample.
+    pub fn approx_m(&self) -> f64 {
+        match self {
+            WaterLevelBucket::Dry => 0.0,
+            WaterLevelBucket::Ankle => 0.10,
+            WaterLevelBucket::Knee => 0.45,
+            WaterLevelBucket::Waist => 0.90,
+            WaterLevelBucket::Chest => 1.30,
+        }
+    }
+}
+
+impl std::fmt::Display for WaterLevelBucket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WaterLevelBucket::Dry => write!(f, "dry"),
+            WaterLevelBucket::Ankle => write!(f, "ankle"),
+            WaterLevelBucket::Knee => write!(f, "knee"),
+            WaterLevelBucket::Waist => write!(f, "waist"),
+            WaterLevelBucket::Chest => write!(f, "chest"),
+        }
+    }
+}
+
+/// A person's own judgment of how passable/dangerous a location is right
+/// now — separate from water depth, because depth alone misses current
+/// speed, downed power lines, open manholes, etc. that only a person on
+/// the ground would know to flag.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportSeverity {
+    Safe,
+    Caution,
+    Dangerous,
+}
+
+impl std::fmt::Display for ReportSeverity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReportSeverity::Safe => write!(f, "safe"),
+            ReportSeverity::Caution => write!(f, "caution"),
+            ReportSeverity::Dangerous => write!(f, "dangerous"),
+        }
+    }
+}
+
+/// One person's real-time, on-the-ground report of flood conditions at a
+/// location — this is the crowd/sensor half of the aggregation this
+/// project is building toward (simulation output is the other half, in
+/// `WaterLevelSample`). Deliberately a separate type and a separate
+/// table from `WaterLevelSample`, not a variant of it or a shared schema
+/// with nullable fields for whichever kind doesn't apply:
+///
+/// - A `WaterLevelSample` exists on a regular timestep grid, produced in
+///   bulk by one simulation run, always has a precise depth in metres,
+///   and never needs confirmation — it's deterministic given its inputs.
+/// - A `FieldReport` exists only when a person submits one, at whatever
+///   irregular moment and location that happens, carries a coarse
+///   human-judged bucket instead of a precise number, and *does* need a
+///   trust signal — `confirm_count`/`dispute_count` are how this project
+///   answers the same question K.A.R.A.'s own "weighs" pipeline stage
+///   answers: how much to trust one report before blending it with
+///   simulated or sensor data for the same location.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldReport {
+    /// None until the store assigns one on insert.
+    pub id: Option<i64>,
+    pub lat: f64,
+    pub lon: f64,
+    pub water_level: WaterLevelBucket,
+    pub severity: ReportSeverity,
+    /// Free-text note, e.g. "downed power line near the 7-Eleven" — the
+    /// kind of hazard detail no sensor or simulation could ever surface.
+    pub note: Option<String>,
+    pub photo_url: Option<String>,
+    pub reported_at: time::OffsetDateTime,
+    pub confirm_count: i64,
+    pub dispute_count: i64,
+}
+
+impl FieldReport {
+    /// A quick, deliberately simple trust signal: net agreement among
+    /// people who've seen this report in person, floored at zero so a
+    /// heavily-disputed report doesn't read as "very trusted" in reverse.
+    /// This is intentionally not a sophisticated weighting model — it's
+    /// the simplest thing that lets an aggregation query prefer
+    /// well-corroborated reports over single, unconfirmed ones, which is
+    /// the actual problem being solved at this stage. A real reputation/
+    /// weighting system (submitter history, photo presence, recency
+    /// decay, official-source boost) is a legitimate later refinement on
+    /// top of this, not a redesign of it.
+    pub fn trust_score(&self) -> i64 {
+        (self.confirm_count - self.dispute_count).max(0)
+    }
+}
+
+/// Which kind of data actually answered a `blended_water_level` query —
+/// the caller's way of knowing whether an eyewitness or a model produced
+/// the number it's showing, since those carry very different trust and
+/// very different staleness behavior (a report gets more stale faster
+/// than a simulated projection does).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlendedSource {
+    /// A field report with at least one net confirmation.
+    FieldReport,
+    /// A field report with no confirmations yet (or more disputes than
+    /// confirmations) — still real, still worth showing, but the caller
+    /// should treat it with more caution than a confirmed one.
+    UnconfirmedFieldReport,
+    /// No report existed nearby; this is a `FloodAnalyzer`-computed value.
+    Simulated,
+}
+
+/// The answer `SnapshotStore::blended_water_level` actually returns —
+/// one number, tagged with where it came from and how current it is, so
+/// a caller never has to separately query reports and simulation and
+/// reconcile them itself.
+#[derive(Debug, Clone)]
+pub struct BlendedReading {
+    pub water_level_m: f64,
+    pub source: BlendedSource,
+    pub confidence: DataConfidence,
+    pub as_of: time::OffsetDateTime,
+}
+
 /// One point-in-time water-level reading at one location, produced by a
 /// `TileGrid` hazard run (flood, wildfire-equivalent intensity, etc.).
 ///
