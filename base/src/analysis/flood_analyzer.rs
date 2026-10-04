@@ -78,7 +78,12 @@ fn lonlat_to_tile(lon: f64, lat: f64, zoom: u8) -> (u32, u32) {
 /// real lat/lon a `WaterLevelSample` needs, since the lookup path
 /// (`SnapshotStore::water_level_timeline`) indexes on coordinates, not
 /// tile/cell indices.
-fn cell_to_lonlat(tile: TileId, cell_x: usize, cell_y: usize) -> (f64, f64) {
+///
+/// `pub(crate)` so a `TileInputSource` implementation (e.g. a GDAL-backed
+/// one reading a real DEM) can resolve the same cell -> lon/lat mapping
+/// this analyzer itself uses, rather than reimplementing — and risking
+/// drifting out of sync with — the same projection math twice.
+pub(crate) fn cell_to_lonlat(tile: TileId, cell_x: usize, cell_y: usize) -> (f64, f64) {
     let n = 2f64.powi(tile.z as i32);
     let tile_frac_x = tile.x as f64 + (cell_x as f64 + 0.5) / GRID_SIZE as f64;
     let tile_frac_y = tile.y as f64 + (cell_y as f64 + 0.5) / GRID_SIZE as f64;
