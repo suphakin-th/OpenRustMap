@@ -165,5 +165,66 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // --- crowd report layer ---
+    // Simulation alone said ~0.06m peak at this point. A person on the
+    // ground sees it worse than that -- real submersion is messier than
+    // any simplified model predicts. This is the gap blended_water_level
+    // exists to close: a real report should win over a model guess.
+    use base::analysis::{FieldReport, ReportSeverity, WaterLevelBucket};
+
+    println!("\n=== Field reports at this location ===");
+    let report = FieldReport {
+        id: None,
+        lat: demo_point_lat,
+        lon: demo_point_lon,
+        water_level: WaterLevelBucket::Knee,
+        severity: ReportSeverity::Caution,
+        note: Some("deeper than it looks, avoid small cars".to_string()),
+        photo_url: None,
+        reported_at: now + time::Duration::hours(2), // near the simulated peak
+        confirm_count: 0,
+        dispute_count: 0,
+    };
+    let saved_report = store.submit_report(&report).await?;
+    println!(
+        "  submitted: knee-deep ({:.2}m), unconfirmed",
+        WaterLevelBucket::Knee.approx_m()
+    );
+
+    // Blended answer right now: the report, even unconfirmed, outranks
+    // the simulated value at the same point/time.
+    let blended = store
+        .blended_water_level(
+            "bangkok-demo-2026",
+            demo_point_lat,
+            demo_point_lon,
+            0.01,
+            now + time::Duration::hours(2),
+        )
+        .await?
+        .expect("expected a blended reading");
+    println!(
+        "  blended answer (before confirmation): {:.2}m, source={:?}",
+        blended.water_level_m, blended.source
+    );
+
+    // A second person on the ground confirms the report -- trust_score
+    // goes positive, and the blended source label reflects that.
+    store.confirm_report(saved_report.id.unwrap()).await?;
+    let blended = store
+        .blended_water_level(
+            "bangkok-demo-2026",
+            demo_point_lat,
+            demo_point_lon,
+            0.01,
+            now + time::Duration::hours(2),
+        )
+        .await?
+        .expect("expected a blended reading");
+    println!(
+        "  blended answer (after 1 confirmation): {:.2}m, source={:?}",
+        blended.water_level_m, blended.source
+    );
+
     Ok(())
 }

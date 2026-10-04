@@ -2,7 +2,10 @@ use snafu::ResultExt;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
 use sqlx::FromRow;
 
-use crate::analysis::{DataConfidence, HazardType, ScenarioResult, WaterLevelSample};
+use crate::analysis::{
+    BlendedReading, BlendedSource, DataConfidence, FieldReport, HazardType, ReportSeverity,
+    ScenarioResult, WaterLevelBucket, WaterLevelSample,
+};
 use crate::error::{self, Error};
 
 /// Row shape exactly as stored — kept separate from `ScenarioResult` because
@@ -35,6 +38,23 @@ struct TimeseriesRow {
     observed_at: String,
     water_level_m: f64,
     confidence: String,
+}
+
+/// On-disk shape of one `field_reports` row — same rationale as the rows
+/// above: `water_level`/`severity` are TEXT in SQLite, typed enums in
+/// memory.
+#[derive(Debug, FromRow)]
+struct FieldReportRow {
+    id: i64,
+    lat: f64,
+    lon: f64,
+    water_level: String,
+    severity: String,
+    note: Option<String>,
+    photo_url: Option<String>,
+    reported_at: String,
+    confirm_count: i64,
+    dispute_count: i64,
 }
 
 /// Embedded, file-based store for finished scenario results.
@@ -101,6 +121,34 @@ CREATE INDEX IF NOT EXISTS idx_timeseries_point_time
     ON water_level_timeseries (lat, lon, observed_at);
 CREATE INDEX IF NOT EXISTS idx_timeseries_scenario
     ON water_level_timeseries (scenario_name);
+
+-- One row per person's real-time report of conditions at a location — the
+-- crowd/ground-truth half of the aggregation this project builds toward,
+-- deliberately a separate table from water_level_timeseries (simulated,
+-- regular-grid, always-precise) rather than a shared schema with nullable
+-- columns for whichever kind doesn't apply. See FieldReport's own doc
+-- comment for the full reasoning.
+CREATE TABLE IF NOT EXISTS field_reports (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    lat             REAL NOT NULL,
+    lon             REAL NOT NULL,
+    water_level     TEXT NOT NULL,   -- WaterLevelBucket: dry/ankle/knee/waist/chest
+    severity        TEXT NOT NULL,   -- ReportSeverity: safe/caution/dangerous
+    note            TEXT,
+    photo_url       TEXT,
+    reported_at     TEXT NOT NULL,   -- RFC3339
+    confirm_count   INTEGER NOT NULL DEFAULT 0,
+    dispute_count   INTEGER NOT NULL DEFAULT 0
+);
+
+-- Reports aren't on a regular grid like simulated samples, so a lookup
+-- can't do an exact lat/lon match the way water_level_timeline does — a
+-- bbox range scan (see nearby_field_reports) is the realistic query shape,
+-- and this index covers exactly that: lat range first (the outer bound of
+-- a small bbox query), then lon, then recency so "most recent nearby
+-- reports" doesn't need a separate sort pass.
+CREATE INDEX IF NOT EXISTS idx_field_reports_location
+    ON field_reports (lat, lon, reported_at);
 "#;
 
 impl SnapshotStore {
@@ -333,6 +381,165 @@ impl SnapshotStore {
 
         rows.into_iter().map(timeseries_row_to_sample).collect()
     }
+
+    /// Submit one person's report. Returns it with `id` filled in — the
+    /// caller needs that id to later call `confirm_report`/`dispute_report`
+    /// against this exact row.
+    pub async fn submit_report(&self, report: &FieldReport) -> Result<FieldReport, Error> {
+        let reported_at = report
+            .reported_at
+            .format(&time::format_description::well_known::Rfc3339)
+            .map_err(|_| Error::NaiveDateTimeError)?;
+
+        let id: i64 = sqlx::query_scalar(
+            "INSERT INTO field_reports \
+                (lat, lon, water_level, severity, note, photo_url, reported_at, confirm_count, dispute_count) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0) \
+             RETURNING id",
+        )
+        .bind(report.lat)
+        .bind(report.lon)
+        .bind(water_level_str(report.water_level))
+        .bind(severity_str(report.severity))
+        .bind(&report.note)
+        .bind(&report.photo_url)
+        .bind(&reported_at)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::DatabaseError {
+            message: format!("failed to submit field report: {}", e),
+        })?;
+
+        Ok(FieldReport {
+            id: Some(id),
+            ..report.clone()
+        })
+    }
+
+    /// Someone on the ground confirms a report still matches what they
+    /// see — raises its `trust_score` (see `FieldReport::trust_score`).
+    pub async fn confirm_report(&self, report_id: i64) -> Result<(), Error> {
+        sqlx::query("UPDATE field_reports SET confirm_count = confirm_count + 1 WHERE id = ?")
+            .bind(report_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::DatabaseError {
+                message: format!("failed to confirm report {report_id}: {e}"),
+            })?;
+        Ok(())
+    }
+
+    /// Someone on the ground disputes a report (K.A.R.A.'s "Water gone" /
+    /// no-longer-accurate signal) — lowers its `trust_score`.
+    pub async fn dispute_report(&self, report_id: i64) -> Result<(), Error> {
+        sqlx::query("UPDATE field_reports SET dispute_count = dispute_count + 1 WHERE id = ?")
+            .bind(report_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| Error::DatabaseError {
+                message: format!("failed to dispute report {report_id}: {e}"),
+            })?;
+        Ok(())
+    }
+
+    /// Every report within a small lat/lon box around `(lat, lon)`,
+    /// newest first. `radius_deg` is a plain coordinate-degree box, not a
+    /// true geodesic radius — deliberately: at the scale this is used for
+    /// (a few hundred metres around one point, within Bangkok's latitude),
+    /// the distortion from treating degrees as flat is far smaller than
+    /// the uncertainty already inherent in a person's own location fix,
+    /// so a real haversine calculation would add complexity without
+    /// adding accuracy that matters here.
+    pub async fn nearby_field_reports(
+        &self,
+        lat: f64,
+        lon: f64,
+        radius_deg: f64,
+    ) -> Result<Vec<FieldReport>, Error> {
+        let rows: Vec<FieldReportRow> = sqlx::query_as(
+            "SELECT * FROM field_reports \
+             WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ? \
+             ORDER BY reported_at DESC",
+        )
+        .bind(lat - radius_deg)
+        .bind(lat + radius_deg)
+        .bind(lon - radius_deg)
+        .bind(lon + radius_deg)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::DatabaseError {
+            message: format!("failed to query nearby field reports: {}", e),
+        })?;
+
+        rows.into_iter().map(field_report_row_to_report).collect()
+    }
+
+    /// The actual blended answer to "how deep is the water here, right
+    /// now" — this is the aggregation step the whole field_reports
+    /// addition exists for, standing in for the "weighs" / "aggregates"
+    /// stages of a pipeline like K.A.R.A.'s own.
+    ///
+    /// Preference order, deliberately simple and explainable rather than
+    /// a black-box score:
+    /// 1. The most recent field report with `trust_score() > 0` — a
+    ///    corroborated eyewitness beats a model every time they disagree,
+    ///    because the model is an estimate and the report is what
+    ///    actually happened.
+    /// 2. The most recent field report at all, if none are corroborated
+    ///    yet — still better than nothing, but flagged as such by the
+    ///    caller checking `trust_score()` itself if it needs to know.
+    /// 3. The simulated value for the same point, if no report exists
+    ///    nearby at all.
+    ///
+    /// Returns `None` only when neither a report nor a simulated sample
+    /// covers this point — i.e. this location truly has no data yet.
+    pub async fn blended_water_level(
+        &self,
+        scenario_name: &str,
+        lat: f64,
+        lon: f64,
+        radius_deg: f64,
+        as_of: time::OffsetDateTime,
+    ) -> Result<Option<BlendedReading>, Error> {
+        let reports = self.nearby_field_reports(lat, lon, radius_deg).await?;
+
+        if let Some(trusted) = reports.iter().find(|r| r.trust_score() > 0) {
+            return Ok(Some(BlendedReading {
+                water_level_m: trusted.water_level.approx_m(),
+                source: BlendedSource::FieldReport,
+                confidence: DataConfidence::Observed,
+                as_of: trusted.reported_at,
+            }));
+        }
+        if let Some(unconfirmed) = reports.first() {
+            return Ok(Some(BlendedReading {
+                water_level_m: unconfirmed.water_level.approx_m(),
+                source: BlendedSource::UnconfirmedFieldReport,
+                confidence: DataConfidence::Observed,
+                as_of: unconfirmed.reported_at,
+            }));
+        }
+
+        // fall back to the nearest-in-time simulated sample at this exact
+        // point — reuses water_level_timeline's exact-match lookup with a
+        // narrow window around `as_of` rather than a fresh query shape.
+        let window_before = as_of - time::Duration::hours(1);
+        let window_after = as_of + time::Duration::hours(1);
+        let samples = self
+            .water_level_timeline(scenario_name, lat, lon, window_before, window_after)
+            .await?;
+
+        let closest = samples.into_iter().min_by_key(|s| {
+            (s.observed_at - as_of).whole_seconds().unsigned_abs()
+        });
+
+        Ok(closest.map(|s| BlendedReading {
+            water_level_m: s.water_level_m,
+            source: BlendedSource::Simulated,
+            confidence: s.confidence,
+            as_of: s.observed_at,
+        }))
+    }
 }
 
 fn confidence_str(c: DataConfidence) -> &'static str {
@@ -364,6 +571,67 @@ fn hazard_from_str(s: &str) -> Result<HazardType, Error> {
             message: format!("unknown hazard_type in snapshot store: {other}"),
         }),
     }
+}
+
+fn water_level_str(w: WaterLevelBucket) -> &'static str {
+    match w {
+        WaterLevelBucket::Dry => "dry",
+        WaterLevelBucket::Ankle => "ankle",
+        WaterLevelBucket::Knee => "knee",
+        WaterLevelBucket::Waist => "waist",
+        WaterLevelBucket::Chest => "chest",
+    }
+}
+
+fn water_level_from_str(s: &str) -> Result<WaterLevelBucket, Error> {
+    match s {
+        "dry" => Ok(WaterLevelBucket::Dry),
+        "ankle" => Ok(WaterLevelBucket::Ankle),
+        "knee" => Ok(WaterLevelBucket::Knee),
+        "waist" => Ok(WaterLevelBucket::Waist),
+        "chest" => Ok(WaterLevelBucket::Chest),
+        other => Err(Error::DatabaseError {
+            message: format!("unknown water_level in field_reports: {other}"),
+        }),
+    }
+}
+
+fn severity_str(s: ReportSeverity) -> &'static str {
+    match s {
+        ReportSeverity::Safe => "safe",
+        ReportSeverity::Caution => "caution",
+        ReportSeverity::Dangerous => "dangerous",
+    }
+}
+
+fn severity_from_str(s: &str) -> Result<ReportSeverity, Error> {
+    match s {
+        "safe" => Ok(ReportSeverity::Safe),
+        "caution" => Ok(ReportSeverity::Caution),
+        "dangerous" => Ok(ReportSeverity::Dangerous),
+        other => Err(Error::DatabaseError {
+            message: format!("unknown severity in field_reports: {other}"),
+        }),
+    }
+}
+
+fn field_report_row_to_report(row: FieldReportRow) -> Result<FieldReport, Error> {
+    Ok(FieldReport {
+        id: Some(row.id),
+        lat: row.lat,
+        lon: row.lon,
+        water_level: water_level_from_str(&row.water_level)?,
+        severity: severity_from_str(&row.severity)?,
+        note: row.note,
+        photo_url: row.photo_url,
+        reported_at: time::OffsetDateTime::parse(
+            &row.reported_at,
+            &time::format_description::well_known::Rfc3339,
+        )
+        .map_err(|_| Error::NaiveDateTimeError)?,
+        confirm_count: row.confirm_count,
+        dispute_count: row.dispute_count,
+    })
 }
 
 fn row_to_result(row: SnapshotRow) -> Result<ScenarioResult, Error> {
@@ -551,5 +819,189 @@ mod tests {
             .unwrap();
 
         assert_eq!(timeline.len(), 300);
+    }
+
+    fn sample_report(lat: f64, lon: f64, level: WaterLevelBucket) -> FieldReport {
+        FieldReport {
+            id: None,
+            lat,
+            lon,
+            water_level: level,
+            severity: ReportSeverity::Caution,
+            note: Some("test report".to_string()),
+            photo_url: None,
+            reported_at: time::OffsetDateTime::now_utc(),
+            confirm_count: 0,
+            dispute_count: 0,
+        }
+    }
+
+    #[tokio::test]
+    async fn submit_report_assigns_id_and_roundtrips() {
+        let store = store().await;
+        let report = sample_report(13.75, 100.51, WaterLevelBucket::Knee);
+
+        let saved = store.submit_report(&report).await.unwrap();
+        assert!(saved.id.is_some());
+
+        let nearby = store
+            .nearby_field_reports(13.75, 100.51, 0.001)
+            .await
+            .unwrap();
+        assert_eq!(nearby.len(), 1);
+        assert_eq!(nearby[0].water_level, WaterLevelBucket::Knee);
+        assert_eq!(nearby[0].confirm_count, 0);
+    }
+
+    #[tokio::test]
+    async fn confirm_and_dispute_change_trust_score() {
+        let store = store().await;
+        let saved = store
+            .submit_report(&sample_report(13.75, 100.51, WaterLevelBucket::Waist))
+            .await
+            .unwrap();
+        let id = saved.id.unwrap();
+
+        store.confirm_report(id).await.unwrap();
+        store.confirm_report(id).await.unwrap();
+        store.dispute_report(id).await.unwrap();
+
+        let nearby = store
+            .nearby_field_reports(13.75, 100.51, 0.001)
+            .await
+            .unwrap();
+        assert_eq!(nearby[0].confirm_count, 2);
+        assert_eq!(nearby[0].dispute_count, 1);
+        assert_eq!(nearby[0].trust_score(), 1); // 2 confirms - 1 dispute
+    }
+
+    #[tokio::test]
+    async fn trust_score_never_goes_negative() {
+        let store = store().await;
+        let saved = store
+            .submit_report(&sample_report(13.75, 100.51, WaterLevelBucket::Ankle))
+            .await
+            .unwrap();
+        let id = saved.id.unwrap();
+
+        store.dispute_report(id).await.unwrap();
+        store.dispute_report(id).await.unwrap();
+        store.dispute_report(id).await.unwrap();
+
+        let nearby = store
+            .nearby_field_reports(13.75, 100.51, 0.001)
+            .await
+            .unwrap();
+        assert_eq!(nearby[0].trust_score(), 0); // floored, not -3
+    }
+
+    #[tokio::test]
+    async fn nearby_field_reports_excludes_out_of_radius_points() {
+        let store = store().await;
+        store
+            .submit_report(&sample_report(13.75, 100.51, WaterLevelBucket::Knee))
+            .await
+            .unwrap();
+        store
+            .submit_report(&sample_report(14.50, 101.20, WaterLevelBucket::Chest)) // far away
+            .await
+            .unwrap();
+
+        let nearby = store
+            .nearby_field_reports(13.75, 100.51, 0.01)
+            .await
+            .unwrap();
+        assert_eq!(nearby.len(), 1);
+        assert_eq!(nearby[0].water_level, WaterLevelBucket::Knee);
+    }
+
+    #[tokio::test]
+    async fn blended_prefers_corroborated_report_over_unconfirmed_and_simulation() {
+        let store = store().await;
+        let now = time::OffsetDateTime::now_utc();
+
+        // simulated baseline for this point
+        store
+            .save_timeseries_batch(&[WaterLevelSample {
+                scenario_name: "bkk-blend-test".to_string(),
+                lat: 13.75,
+                lon: 100.51,
+                observed_at: now,
+                water_level_m: 0.05, // low — simulation thinks it's barely wet
+                confidence: DataConfidence::Modeled,
+            }])
+            .await
+            .unwrap();
+
+        // an unconfirmed report disagreeing with the simulation
+        let unconfirmed = store
+            .submit_report(&sample_report(13.75, 100.51, WaterLevelBucket::Ankle))
+            .await
+            .unwrap();
+
+        // blended should prefer the unconfirmed report over simulation,
+        // since any real report outranks a pure model guess
+        let reading = store
+            .blended_water_level("bkk-blend-test", 13.75, 100.51, 0.01, now)
+            .await
+            .unwrap()
+            .expect("expected a reading");
+        assert_eq!(reading.source, BlendedSource::UnconfirmedFieldReport);
+        assert_eq!(reading.water_level_m, WaterLevelBucket::Ankle.approx_m());
+
+        // now corroborate a DIFFERENT, more severe report — this should
+        // take over as the top answer
+        let corroborated = store
+            .submit_report(&sample_report(13.75, 100.51, WaterLevelBucket::Chest))
+            .await
+            .unwrap();
+        store.confirm_report(corroborated.id.unwrap()).await.unwrap();
+        let _ = unconfirmed; // keep alive for clarity; already persisted
+
+        let reading = store
+            .blended_water_level("bkk-blend-test", 13.75, 100.51, 0.01, now)
+            .await
+            .unwrap()
+            .expect("expected a reading");
+        assert_eq!(reading.source, BlendedSource::FieldReport);
+        assert_eq!(reading.water_level_m, WaterLevelBucket::Chest.approx_m());
+    }
+
+    #[tokio::test]
+    async fn blended_falls_back_to_simulation_when_no_reports_exist() {
+        let store = store().await;
+        let now = time::OffsetDateTime::now_utc();
+
+        store
+            .save_timeseries_batch(&[WaterLevelSample {
+                scenario_name: "bkk-sim-only".to_string(),
+                lat: 13.80,
+                lon: 100.60,
+                observed_at: now,
+                water_level_m: 0.30,
+                confidence: DataConfidence::Modeled,
+            }])
+            .await
+            .unwrap();
+
+        let reading = store
+            .blended_water_level("bkk-sim-only", 13.80, 100.60, 0.01, now)
+            .await
+            .unwrap()
+            .expect("expected a reading");
+        assert_eq!(reading.source, BlendedSource::Simulated);
+        assert_eq!(reading.water_level_m, 0.30);
+    }
+
+    #[tokio::test]
+    async fn blended_returns_none_when_nothing_covers_the_point() {
+        let store = store().await;
+        let now = time::OffsetDateTime::now_utc();
+
+        let reading = store
+            .blended_water_level("no-such-scenario", 0.0, 0.0, 0.01, now)
+            .await
+            .unwrap();
+        assert!(reading.is_none());
     }
 }

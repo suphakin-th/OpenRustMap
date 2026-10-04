@@ -12,6 +12,7 @@ pub use flood_analyzer::{FloodAnalyzer, TileInputSource};
 pub use tile_grid::{run_tile_grid, TileId, TileState};
 pub use trait_def::HazardAnalyzer;
 pub use types::{
-    ComputeModel, DataConfidence, HazardType, ScenarioInput, ScenarioParameter, ScenarioResult,
+    BlendedReading, BlendedSource, ComputeModel, DataConfidence, FieldReport, HazardType,
+    ReportSeverity, ScenarioInput, ScenarioParameter, ScenarioResult, WaterLevelBucket,
     WaterLevelSample,
 };
